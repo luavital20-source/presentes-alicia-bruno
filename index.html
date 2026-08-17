@@ -16,7 +16,6 @@
     --eucalipto:#4A5D4E;
     --sage:#8CA089;
     --dourado:#B08A4A;
-    --sombra:rgba(40,55,42,.18);
   }
 
   *{box-sizing:border-box;margin:0;padding:0}
@@ -41,33 +40,29 @@
     -webkit-tap-highlight-color:transparent;
   }
 
-  /* textura de papel discreta atrás da imagem */
   #palco{
     position:fixed;
     inset:0;
-    background:
-      radial-gradient(120% 90% at 50% 0%, #F5F3EA 0%, #E4E2D6 70%, #D8D8CB 100%);
+    background:radial-gradient(120% 90% at 50% 0%, #F5F3EA 0%, #E4E2D6 70%, #D8D8CB 100%);
     cursor:grab;
+    overflow:hidden;
   }
   #palco.arrastando{cursor:grabbing}
 
-  #folha{
+  /* A imagem tem largura e altura reais em pixels, definidas pelo script.
+     Nada de filter/will-change fixos: eles congelam a rasterização e
+     é isso que deixa o zoom borrado. */
+  #imagem{
     position:absolute;
-    inset:0;
+    left:0;
+    top:0;
     transform-origin:0 0;
-    will-change:transform;
-  }
-
-  #folha img{
-    width:100%;
-    height:100%;
-    object-fit:contain;
     display:block;
-    filter:drop-shadow(0 10px 30px var(--sombra));
+    box-shadow:0 10px 30px rgba(40,55,42,.18);
     pointer-events:none;
+    image-rendering:auto;
   }
 
-  /* barra de controles */
   #controles{
     position:fixed;
     left:50%;
@@ -98,10 +93,11 @@
     height:38px;
     border-radius:999px;
     cursor:pointer;
-    transition:background .18s ease, color .18s ease;
+    transition:background .18s ease, opacity .18s ease;
   }
   #controles button:hover{background:rgba(140,160,137,.22)}
   #controles button:active{background:rgba(140,160,137,.34)}
+  #controles button:disabled{opacity:.32;cursor:default}
   #controles button:focus-visible{outline:2px solid var(--dourado);outline-offset:2px}
 
   #nivel{
@@ -127,7 +123,6 @@
   }
   #reiniciar[hidden]{display:none}
 
-  /* dica inicial */
   #dica{
     position:fixed;
     left:50%;
@@ -153,7 +148,7 @@
 
   @media (prefers-reduced-motion:reduce){
     #dica{animation:none;opacity:.9}
-    #folha{transition:none !important}
+    #imagem{transition:none !important}
   }
 
   @media (max-width:520px){
@@ -165,9 +160,7 @@
 <body>
 
 <div id="palco">
-  <div id="folha">
-    <img id="imagem" src="lista-presentes.jpg" alt="Lista de presentes de Alicia e Bruno" draggable="false">
-  </div>
+  <img id="imagem" src="lista-presentes.jpg" alt="Lista de presentes de Alicia e Bruno" draggable="false">
 </div>
 
 <p id="dica">Toque duas vezes para ampliar</p>
@@ -182,84 +175,113 @@
 <script>
 (function(){
   const palco   = document.getElementById('palco');
-  const folha   = document.getElementById('folha');
-  const imagem  = document.getElementById('imagem');
+  const img     = document.getElementById('imagem');
   const nivelEl = document.getElementById('nivel');
   const btnMais = document.getElementById('mais');
   const btnMenos= document.getElementById('menos');
   const btnReset= document.getElementById('reiniciar');
 
-  const MIN = 1, MAX = 8;
-  let escala = 1, tx = 0, ty = 0;
-  let conteudo = {x:0,y:0,w:0,h:0};   // área real da imagem dentro do palco (sem as bordas vazias)
+  const MIN = 1, MAX = 6;
+  const SUAVE = 'transform .28s cubic-bezier(.22,.61,.36,1)';
+
+  let ajuste = {x:0,y:0,w:0,h:0};   // retângulo da imagem encaixada na tela
+  let rect   = {x:0,y:0,w:0,h:0};   // onde a imagem está agora, em pixels de tela
+  let fixado = {x:0,y:0,w:0,h:0};   // tamanho real de layout já aplicado ao <img>
+  let escala = 1;
+  let timerNitidez = null;
+
   const ponteiros = new Map();
   let pinca = null, arraste = null, moveu = false;
 
-  function medirConteudo(){
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const ar = (imagem.naturalWidth || 1) / (imagem.naturalHeight || 1);
+  function medirAjuste(){
+    const vw = innerWidth, vh = innerHeight;
+    const ar = (img.naturalWidth || 1) / (img.naturalHeight || 1);
     let w, h;
     if (vw / vh > ar){ h = vh; w = vh * ar; } else { w = vw; h = vw / ar; }
-    conteudo = { x:(vw-w)/2, y:(vh-h)/2, w, h };
+    ajuste = { x:(vw-w)/2, y:(vh-h)/2, w, h };
   }
 
   function limitar(){
-    const vw = window.innerWidth, vh = window.innerHeight;
-    const lx = conteudo.x * escala, ly = conteudo.y * escala;
-    const cw = conteudo.w * escala, ch = conteudo.h * escala;
-
-    if (cw <= vw) tx = (vw - cw)/2 - lx;
-    else tx = Math.min(-lx, Math.max(vw - cw - lx, tx));
-
-    if (ch <= vh) ty = (vh - ch)/2 - ly;
-    else ty = Math.min(-ly, Math.max(vh - ch - ly, ty));
+    const vw = innerWidth, vh = innerHeight;
+    rect.x = rect.w <= vw ? (vw - rect.w)/2 : Math.min(0, Math.max(vw - rect.w, rect.x));
+    rect.y = rect.h <= vh ? (vh - rect.h)/2 : Math.min(0, Math.max(vh - rect.h, rect.y));
   }
 
-  function aplicar(suave){
+  // Movimento fluido: transform barato por cima do tamanho já fixado.
+  function desenhar(suave){
     limitar();
-    folha.style.transition = suave ? 'transform .28s cubic-bezier(.22,.61,.36,1)' : 'none';
-    folha.style.transform  = `translate(${tx}px, ${ty}px) scale(${escala})`;
-    nivelEl.textContent = Math.round(escala * 100) + '%';
-    btnReset.hidden = escala <= 1.001;
+    const k  = rect.w / fixado.w;
+    const dx = rect.x - fixado.x * k;
+    const dy = rect.y - fixado.y * k;
+    img.style.transition = suave ? SUAVE : 'none';
+    img.style.transform  = `translate(${dx}px, ${dy}px) scale(${k})`;
+    nivelEl.textContent  = Math.round(escala * 100) + '%';
+    btnReset.hidden   = escala <= 1.001;
     btnMais.disabled  = escala >= MAX - .001;
     btnMenos.disabled = escala <= MIN + .001;
+    agendarNitidez(suave ? 320 : 130);
   }
 
-  // zoom mantendo o ponto (px,py) da tela fixo
+  // Aqui está o ganho de nitidez: em vez de esticar um bitmap já rasterizado,
+  // damos ao <img> o tamanho real em pixels e o navegador redesenha o JPEG
+  // naquela escala, usando toda a resolução disponível do arquivo.
+  function firmarNitidez(){
+    if (ponteiros.size) return;
+    fixado = { x:rect.x, y:rect.y, w:rect.w, h:rect.h };
+    img.style.transition = 'none';
+    img.style.transform  = 'none';
+    img.style.left   = rect.x + 'px';
+    img.style.top    = rect.y + 'px';
+    img.style.width  = rect.w + 'px';
+    img.style.height = rect.h + 'px';
+  }
+
+  function agendarNitidez(espera){
+    clearTimeout(timerNitidez);
+    timerNitidez = setTimeout(firmarNitidez, espera);
+  }
+
   function zoomPara(novo, px, py, suave){
     novo = Math.min(MAX, Math.max(MIN, novo));
-    if (novo === escala) return;
-    tx = px - (novo / escala) * (px - tx);
-    ty = py - (novo / escala) * (py - ty);
+    if (Math.abs(novo - escala) < .0005) return;
+    const nw = ajuste.w * novo;
+    const proporcao = nw / rect.w;
+    rect.x = px - proporcao * (px - rect.x);
+    rect.y = py - proporcao * (py - rect.y);
+    rect.w = nw;
+    rect.h = ajuste.h * novo;
     escala = novo;
-    aplicar(suave);
+    desenhar(suave);
   }
 
-  const centro = () => [window.innerWidth/2, window.innerHeight/2];
+  const centro = () => [innerWidth/2, innerHeight/2];
+
+  function reencaixar(suave){
+    escala = 1;
+    rect = { x:ajuste.x, y:ajuste.y, w:ajuste.w, h:ajuste.h };
+    desenhar(suave);
+  }
 
   btnMais .addEventListener('click', () => zoomPara(escala * 1.6, ...centro(), true));
   btnMenos.addEventListener('click', () => zoomPara(escala / 1.6, ...centro(), true));
-  btnReset.addEventListener('click', () => { escala = 1; aplicar(true); });
+  btnReset.addEventListener('click', () => reencaixar(true));
 
-  // roda do mouse / trackpad
   palco.addEventListener('wheel', e => {
     e.preventDefault();
-    const fator = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0022));
-    zoomPara(escala * fator, e.clientX, e.clientY, false);
+    zoomPara(escala * Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0022)), e.clientX, e.clientY, false);
   }, {passive:false});
 
-  // toque e mouse: arrastar e pinçar
   palco.addEventListener('pointerdown', e => {
     palco.setPointerCapture(e.pointerId);
     ponteiros.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    clearTimeout(timerNitidez);
     moveu = false;
-
     if (ponteiros.size === 2){
       const [a,b] = [...ponteiros.values()];
       pinca = { dist: Math.hypot(a.x-b.x, a.y-b.y), escala };
       arraste = null;
     } else if (ponteiros.size === 1){
-      arraste = { x:e.clientX - tx, y:e.clientY - ty };
+      arraste = { x:e.clientX - rect.x, y:e.clientY - rect.y };
       palco.classList.add('arrastando');
     }
   });
@@ -268,15 +290,14 @@
     if (!ponteiros.has(e.pointerId)) return;
     ponteiros.set(e.pointerId, {x:e.clientX, y:e.clientY});
     moveu = true;
-
     if (pinca && ponteiros.size === 2){
       const [a,b] = [...ponteiros.values()];
       const dist = Math.hypot(a.x-b.x, a.y-b.y);
       zoomPara(pinca.escala * (dist / pinca.dist), (a.x+b.x)/2, (a.y+b.y)/2, false);
     } else if (arraste && ponteiros.size === 1){
-      tx = e.clientX - arraste.x;
-      ty = e.clientY - arraste.y;
-      aplicar(false);
+      rect.x = e.clientX - arraste.x;
+      rect.y = e.clientY - arraste.y;
+      desenhar(false);
     }
   });
 
@@ -286,48 +307,54 @@
     if (ponteiros.size === 0){
       arraste = null;
       palco.classList.remove('arrastando');
+      agendarNitidez(60);
     } else {
       const p = [...ponteiros.values()][0];
-      arraste = { x:p.x - tx, y:p.y - ty };
+      arraste = { x:p.x - rect.x, y:p.y - rect.y };
     }
   }
   palco.addEventListener('pointerup', soltar);
   palco.addEventListener('pointercancel', soltar);
 
-  // toque duplo / clique duplo alterna entre ajustado e ampliado
   let ultimoToque = 0;
   palco.addEventListener('pointerup', e => {
     if (moveu || e.pointerType === 'mouse') return;
     const agora = Date.now();
     if (agora - ultimoToque < 300){
-      zoomPara(escala > 1.05 ? 1 : 2.6, e.clientX, e.clientY, true);
+      zoomPara(escala > 1.05 ? 1 : 2.4, e.clientX, e.clientY, true);
       ultimoToque = 0;
     } else ultimoToque = agora;
   });
+
   palco.addEventListener('dblclick', e => {
     e.preventDefault();
-    zoomPara(escala > 1.05 ? 1 : 2.6, e.clientX, e.clientY, true);
+    zoomPara(escala > 1.05 ? 1 : 2.4, e.clientX, e.clientY, true);
   });
 
-  // teclado
-  window.addEventListener('keydown', e => {
+  addEventListener('keydown', e => {
     const passo = 60;
-    if (e.key === '+' || e.key === '=') { zoomPara(escala*1.6, ...centro(), true); e.preventDefault(); }
+    if (e.key === '+' || e.key === '=')      { zoomPara(escala*1.6, ...centro(), true); e.preventDefault(); }
     else if (e.key === '-' || e.key === '_') { zoomPara(escala/1.6, ...centro(), true); e.preventDefault(); }
-    else if (e.key === '0') { escala = 1; aplicar(true); }
-    else if (e.key === 'ArrowLeft')  { tx += passo; aplicar(false); e.preventDefault(); }
-    else if (e.key === 'ArrowRight') { tx -= passo; aplicar(false); e.preventDefault(); }
-    else if (e.key === 'ArrowUp')    { ty += passo; aplicar(false); e.preventDefault(); }
-    else if (e.key === 'ArrowDown')  { ty -= passo; aplicar(false); e.preventDefault(); }
+    else if (e.key === '0')                  { reencaixar(true); }
+    else if (e.key === 'ArrowLeft')  { rect.x += passo; desenhar(false); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { rect.x -= passo; desenhar(false); e.preventDefault(); }
+    else if (e.key === 'ArrowUp')    { rect.y += passo; desenhar(false); e.preventDefault(); }
+    else if (e.key === 'ArrowDown')  { rect.y -= passo; desenhar(false); e.preventDefault(); }
   });
 
-  window.addEventListener('resize', () => { medirConteudo(); aplicar(false); });
-  document.addEventListener('gesturestart', e => e.preventDefault()); // pinça nativa do Safari
-  document.addEventListener('contextmenu', e => { if (e.target === imagem) e.preventDefault(); });
+  addEventListener('resize', () => { medirAjuste(); reencaixar(false); firmarNitidez(); });
+  document.addEventListener('gesturestart', e => e.preventDefault());
+  img.addEventListener('contextmenu', e => e.preventDefault());
 
-  function iniciar(){ medirConteudo(); aplicar(false); }
-  if (imagem.complete && imagem.naturalWidth) iniciar();
-  else imagem.addEventListener('load', iniciar);
+  function iniciar(){
+    medirAjuste();
+    rect = { x:ajuste.x, y:ajuste.y, w:ajuste.w, h:ajuste.h };
+    fixado = { ...rect };
+    firmarNitidez();
+    desenhar(false);
+  }
+  if (img.complete && img.naturalWidth) iniciar();
+  else img.addEventListener('load', iniciar);
 })();
 </script>
 </body>
