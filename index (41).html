@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>Lista de Presentes — Alicia e Bruno</title>
+<meta name="description" content="Lista de presentes de Alicia e Bruno. Escolha um item e envie para reservar.">
+<meta property="og:title" content="Lista de Presentes — Alicia e Bruno">
+<meta property="og:description" content="Escolha um item da lista e me envie para que eu possa reservá-lo.">
+<meta property="og:image" content="lista-presentes.jpg">
+<meta name="theme-color" content="#EDEBE1">
+<link rel="icon" href="lista-presentes.jpg">
+<style>
+  :root{
+    --papel:#EDEBE1;
+    --eucalipto:#4A5D4E;
+    --sage:#8CA089;
+    --dourado:#B08A4A;
+    --sombra:rgba(40,55,42,.18);
+  }
+
+  *{box-sizing:border-box;margin:0;padding:0}
+
+  html,body{
+    height:100%;
+    width:100%;
+    overflow:hidden;
+    position:fixed;
+    inset:0;
+    overscroll-behavior:none;
+    background:var(--papel);
+    -webkit-text-size-adjust:100%;
+  }
+
+  body{
+    font-family:"Iowan Old Style","Palatino Linotype",Palatino,Georgia,serif;
+    color:var(--eucalipto);
+    touch-action:none;
+    -webkit-user-select:none;
+    user-select:none;
+    -webkit-tap-highlight-color:transparent;
+  }
+
+  /* textura de papel discreta atrás da imagem */
+  #palco{
+    position:fixed;
+    inset:0;
+    background:
+      radial-gradient(120% 90% at 50% 0%, #F5F3EA 0%, #E4E2D6 70%, #D8D8CB 100%);
+    cursor:grab;
+  }
+  #palco.arrastando{cursor:grabbing}
+
+  #folha{
+    position:absolute;
+    inset:0;
+    transform-origin:0 0;
+    will-change:transform;
+  }
+
+  #folha img{
+    width:100%;
+    height:100%;
+    object-fit:contain;
+    display:block;
+    filter:drop-shadow(0 10px 30px var(--sombra));
+    pointer-events:none;
+  }
+
+  /* barra de controles */
+  #controles{
+    position:fixed;
+    left:50%;
+    bottom:max(18px, env(safe-area-inset-bottom));
+    transform:translateX(-50%);
+    display:flex;
+    align-items:center;
+    gap:2px;
+    padding:4px;
+    background:rgba(247,245,238,.86);
+    -webkit-backdrop-filter:blur(10px);
+    backdrop-filter:blur(10px);
+    border:1px solid rgba(140,160,137,.45);
+    border-radius:999px;
+    box-shadow:0 6px 22px rgba(40,55,42,.16);
+    z-index:10;
+  }
+
+  #controles button{
+    appearance:none;
+    border:0;
+    background:transparent;
+    color:var(--eucalipto);
+    font:inherit;
+    font-size:19px;
+    line-height:1;
+    width:42px;
+    height:38px;
+    border-radius:999px;
+    cursor:pointer;
+    transition:background .18s ease, color .18s ease;
+  }
+  #controles button:hover{background:rgba(140,160,137,.22)}
+  #controles button:active{background:rgba(140,160,137,.34)}
+  #controles button:focus-visible{outline:2px solid var(--dourado);outline-offset:2px}
+
+  #nivel{
+    min-width:56px;
+    text-align:center;
+    font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:12px;
+    letter-spacing:.09em;
+    color:var(--sage);
+    font-variant-numeric:tabular-nums;
+  }
+
+  #reiniciar{
+    font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:11px;
+    letter-spacing:.12em;
+    text-transform:uppercase;
+    width:auto;
+    padding:0 14px;
+    color:var(--dourado);
+    border-left:1px solid rgba(140,160,137,.4);
+    border-radius:0 999px 999px 0;
+  }
+  #reiniciar[hidden]{display:none}
+
+  /* dica inicial */
+  #dica{
+    position:fixed;
+    left:50%;
+    top:max(16px, env(safe-area-inset-top));
+    transform:translateX(-50%);
+    font-family:ui-sans-serif,-apple-system,"Segoe UI",Roboto,sans-serif;
+    font-size:11px;
+    letter-spacing:.14em;
+    text-transform:uppercase;
+    color:var(--sage);
+    background:rgba(247,245,238,.8);
+    -webkit-backdrop-filter:blur(8px);
+    backdrop-filter:blur(8px);
+    padding:8px 16px;
+    border-radius:999px;
+    white-space:nowrap;
+    z-index:10;
+    animation:aparecer .8s ease .3s both, sumir .8s ease 5s both;
+  }
+
+  @keyframes aparecer{from{opacity:0;transform:translate(-50%,-8px)}to{opacity:1;transform:translate(-50%,0)}}
+  @keyframes sumir{to{opacity:0;visibility:hidden}}
+
+  @media (prefers-reduced-motion:reduce){
+    #dica{animation:none;opacity:.9}
+    #folha{transition:none !important}
+  }
+
+  @media (max-width:520px){
+    #controles button{width:38px;height:36px;font-size:18px}
+    #dica{font-size:10px;letter-spacing:.1em;padding:7px 13px}
+  }
+</style>
+</head>
+<body>
+
+<div id="palco">
+  <div id="folha">
+    <img id="imagem" src="lista-presentes.jpg" alt="Lista de presentes de Alicia e Bruno" draggable="false">
+  </div>
+</div>
+
+<p id="dica">Toque duas vezes para ampliar</p>
+
+<div id="controles" role="group" aria-label="Controles de zoom">
+  <button id="menos" type="button" aria-label="Diminuir zoom">−</button>
+  <span id="nivel" aria-live="polite">100%</span>
+  <button id="mais" type="button" aria-label="Aumentar zoom">+</button>
+  <button id="reiniciar" type="button" hidden>Ajustar</button>
+</div>
+
+<script>
+(function(){
+  const palco   = document.getElementById('palco');
+  const folha   = document.getElementById('folha');
+  const imagem  = document.getElementById('imagem');
+  const nivelEl = document.getElementById('nivel');
+  const btnMais = document.getElementById('mais');
+  const btnMenos= document.getElementById('menos');
+  const btnReset= document.getElementById('reiniciar');
+
+  const MIN = 1, MAX = 8;
+  let escala = 1, tx = 0, ty = 0;
+  let conteudo = {x:0,y:0,w:0,h:0};   // área real da imagem dentro do palco (sem as bordas vazias)
+  const ponteiros = new Map();
+  let pinca = null, arraste = null, moveu = false;
+
+  function medirConteudo(){
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const ar = (imagem.naturalWidth || 1) / (imagem.naturalHeight || 1);
+    let w, h;
+    if (vw / vh > ar){ h = vh; w = vh * ar; } else { w = vw; h = vw / ar; }
+    conteudo = { x:(vw-w)/2, y:(vh-h)/2, w, h };
+  }
+
+  function limitar(){
+    const vw = window.innerWidth, vh = window.innerHeight;
+    const lx = conteudo.x * escala, ly = conteudo.y * escala;
+    const cw = conteudo.w * escala, ch = conteudo.h * escala;
+
+    if (cw <= vw) tx = (vw - cw)/2 - lx;
+    else tx = Math.min(-lx, Math.max(vw - cw - lx, tx));
+
+    if (ch <= vh) ty = (vh - ch)/2 - ly;
+    else ty = Math.min(-ly, Math.max(vh - ch - ly, ty));
+  }
+
+  function aplicar(suave){
+    limitar();
+    folha.style.transition = suave ? 'transform .28s cubic-bezier(.22,.61,.36,1)' : 'none';
+    folha.style.transform  = `translate(${tx}px, ${ty}px) scale(${escala})`;
+    nivelEl.textContent = Math.round(escala * 100) + '%';
+    btnReset.hidden = escala <= 1.001;
+    btnMais.disabled  = escala >= MAX - .001;
+    btnMenos.disabled = escala <= MIN + .001;
+  }
+
+  // zoom mantendo o ponto (px,py) da tela fixo
+  function zoomPara(novo, px, py, suave){
+    novo = Math.min(MAX, Math.max(MIN, novo));
+    if (novo === escala) return;
+    tx = px - (novo / escala) * (px - tx);
+    ty = py - (novo / escala) * (py - ty);
+    escala = novo;
+    aplicar(suave);
+  }
+
+  const centro = () => [window.innerWidth/2, window.innerHeight/2];
+
+  btnMais .addEventListener('click', () => zoomPara(escala * 1.6, ...centro(), true));
+  btnMenos.addEventListener('click', () => zoomPara(escala / 1.6, ...centro(), true));
+  btnReset.addEventListener('click', () => { escala = 1; aplicar(true); });
+
+  // roda do mouse / trackpad
+  palco.addEventListener('wheel', e => {
+    e.preventDefault();
+    const fator = Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0022));
+    zoomPara(escala * fator, e.clientX, e.clientY, false);
+  }, {passive:false});
+
+  // toque e mouse: arrastar e pinçar
+  palco.addEventListener('pointerdown', e => {
+    palco.setPointerCapture(e.pointerId);
+    ponteiros.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    moveu = false;
+
+    if (ponteiros.size === 2){
+      const [a,b] = [...ponteiros.values()];
+      pinca = { dist: Math.hypot(a.x-b.x, a.y-b.y), escala };
+      arraste = null;
+    } else if (ponteiros.size === 1){
+      arraste = { x:e.clientX - tx, y:e.clientY - ty };
+      palco.classList.add('arrastando');
+    }
+  });
+
+  palco.addEventListener('pointermove', e => {
+    if (!ponteiros.has(e.pointerId)) return;
+    ponteiros.set(e.pointerId, {x:e.clientX, y:e.clientY});
+    moveu = true;
+
+    if (pinca && ponteiros.size === 2){
+      const [a,b] = [...ponteiros.values()];
+      const dist = Math.hypot(a.x-b.x, a.y-b.y);
+      zoomPara(pinca.escala * (dist / pinca.dist), (a.x+b.x)/2, (a.y+b.y)/2, false);
+    } else if (arraste && ponteiros.size === 1){
+      tx = e.clientX - arraste.x;
+      ty = e.clientY - arraste.y;
+      aplicar(false);
+    }
+  });
+
+  function soltar(e){
+    ponteiros.delete(e.pointerId);
+    if (ponteiros.size < 2) pinca = null;
+    if (ponteiros.size === 0){
+      arraste = null;
+      palco.classList.remove('arrastando');
+    } else {
+      const p = [...ponteiros.values()][0];
+      arraste = { x:p.x - tx, y:p.y - ty };
+    }
+  }
+  palco.addEventListener('pointerup', soltar);
+  palco.addEventListener('pointercancel', soltar);
+
+  // toque duplo / clique duplo alterna entre ajustado e ampliado
+  let ultimoToque = 0;
+  palco.addEventListener('pointerup', e => {
+    if (moveu || e.pointerType === 'mouse') return;
+    const agora = Date.now();
+    if (agora - ultimoToque < 300){
+      zoomPara(escala > 1.05 ? 1 : 2.6, e.clientX, e.clientY, true);
+      ultimoToque = 0;
+    } else ultimoToque = agora;
+  });
+  palco.addEventListener('dblclick', e => {
+    e.preventDefault();
+    zoomPara(escala > 1.05 ? 1 : 2.6, e.clientX, e.clientY, true);
+  });
+
+  // teclado
+  window.addEventListener('keydown', e => {
+    const passo = 60;
+    if (e.key === '+' || e.key === '=') { zoomPara(escala*1.6, ...centro(), true); e.preventDefault(); }
+    else if (e.key === '-' || e.key === '_') { zoomPara(escala/1.6, ...centro(), true); e.preventDefault(); }
+    else if (e.key === '0') { escala = 1; aplicar(true); }
+    else if (e.key === 'ArrowLeft')  { tx += passo; aplicar(false); e.preventDefault(); }
+    else if (e.key === 'ArrowRight') { tx -= passo; aplicar(false); e.preventDefault(); }
+    else if (e.key === 'ArrowUp')    { ty += passo; aplicar(false); e.preventDefault(); }
+    else if (e.key === 'ArrowDown')  { ty -= passo; aplicar(false); e.preventDefault(); }
+  });
+
+  window.addEventListener('resize', () => { medirConteudo(); aplicar(false); });
+  document.addEventListener('gesturestart', e => e.preventDefault()); // pinça nativa do Safari
+  document.addEventListener('contextmenu', e => { if (e.target === imagem) e.preventDefault(); });
+
+  function iniciar(){ medirConteudo(); aplicar(false); }
+  if (imagem.complete && imagem.naturalWidth) iniciar();
+  else imagem.addEventListener('load', iniciar);
+})();
+</script>
+</body>
+</html>
